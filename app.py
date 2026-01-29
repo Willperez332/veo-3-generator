@@ -7,12 +7,12 @@ import re
 import time
 import json
 import requests
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from pathlib import Path
 import zipfile
 from datetime import datetime
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'outputs'
 Path(app.config['UPLOAD_FOLDER']).mkdir(exist_ok=True)
