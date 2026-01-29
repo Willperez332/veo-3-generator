@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VEO 3 Asset Generator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 40px;
+        }
+        .section {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #fff;
+        }
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #ccc;
+        }
+        input[type="text"],
+        input[type="password"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        textarea {
+            min-height: 300px;
+            font-family: 'SF Mono', Monaco, monospace;
+            resize: vertical;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 14px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover:not(:disabled) {
+            opacity: 0.9;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .job-list {
+            margin-top: 24px;
+        }
+        .job {
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .job-label {
+            font-weight: 500;
+        }
+        .job-status {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-queued { background: #333; color: #888; }
+        .status-generating { background: #2563eb; color: white; }
+        .status-completed { background: #10b981; color: white; }
+        .status-failed { background: #ef4444; color: white; }
+        .hidden { display: none; }
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 24px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .stats {
+            display: flex;
+            gap: 24px;
+            margin-top: 16px;
+            font-size: 14px;
+            color: #888;
+        }
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stat-value {
+            font-weight: 600;
+            color: #fff;
+        }
+        .note {
+            background: #1a1a1a;
+            border-left: 3px solid #667eea;
+            padding: 12px 16px;
+            margin-top: 16px;
+            font-size: 13px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌙 VEO 3 Asset Generator</h1>
+        <p class="subtitle">Batch generate videos from formatted scripts</p>
+
+        <div class="section">
+            <div class="section-title">1. API Configuration</div>
+            <label for="apiKey">Kie AI API Key</label>
+            <input type="password" id="apiKey" placeholder="c655638addd6acd44f69431550cb7dcd">
+            <div class="note">
+                Your API key is saved in your browser. Get yours at <a href="https://kie.ai" target="_blank" style="color: #667eea;">kie.ai</a>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">2. Upload Avatar Image</div>
+            <input type="file" id="avatarFile" accept="image/*" style="
+                width: 100%;
+                padding: 12px;
+                background: #0a0a0a;
+                border: 1px solid #333;
+                border-radius: 8px;
+                color: #e0e0e0;
+                font-size: 14px;
+                cursor: pointer;
+            ">
+            <div class="note">
+                Upload the avatar image to use in your videos (doctor, person, etc.)
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">3. Paste Formatted Script</div>
+            <textarea id="script" placeholder="Backend 1 
+NO CAPTIONS ON SCREEN. NO CAMERA MOVEMENTS. NO EDITS. NO BACKGROUND MUSIC. Handheld phone video style. Make the avatar say in a validating, slightly surprised tone: &quot;She's actually not entirely wrong...&quot;
+
+Backend 2 — HOLDING PRODUCT
+NO CAPTIONS ON SCREEN. NO CAMERA MOVEMENTS. NO EDITS. NO BACKGROUND MUSIC. Handheld phone video style. Make the avatar say with product in hand..."></textarea>
+            <div class="note">
+                <strong>Tip:</strong> Add "— HOLDING PRODUCT" after segment labels (e.g., Backend 7 — HOLDING PRODUCT) to generate product version
+            </div>
+        </div>
+
+        <div class="section">
+            <button id="generateBtn" onclick="startGeneration()">🚀 Generate Videos</button>
+            <div class="note" style="margin-top: 16px;">
+                <strong>How it works:</strong>
+                <ul style="margin: 8px 0 0 20px; font-size: 13px; line-height: 1.6;">
+                    <li>Normal segments → 1 video (avatar only)</li>
+                    <li>Segments with "— HOLDING PRODUCT" → 2 videos (normal + with product)</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section hidden" id="progressSection">
+            <div class="section-title">Generation Progress</div>
+            <div class="stats">
+                <div class="stat-item">
+                    <span>Total:</span>
+                    <span class="stat-value" id="totalJobs">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>Completed:</span>
+                    <span class="stat-value" id="completedJobs">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>Failed:</span>
+                    <span class="stat-value" id="failedJobs">0</span>
+                </div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="job-list" id="jobList"></div>
+            <button id="downloadBtn" class="hidden" onclick="downloadBatch()">📥 Download All Videos</button>
+        </div>
+    </div>
+
+    <script>
+        let currentBatchId = null;
+        let pollInterval = null;
+
+        // Load saved API key
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedKey = localStorage.getItem('kie_api_key');
+            if (savedKey) document.getElementById('apiKey').value = savedKey;
+        });
+
+        // Save API key on change
+        document.getElementById('apiKey').addEventListener('change', (e) => {
+            localStorage.setItem('kie_api_key', e.target.value);
+        });
+
+        async function startGeneration() {
+            const apiKey = document.getElementById('apiKey').value;
+            const script = document.getElementById('script').value;
+            const avatarFile = document.getElementById('avatarFile').files[0];
+
+            if (!apiKey || !script) {
+                alert('Please provide API key and script');
+                return;
+            }
+
+            if (!avatarFile) {
+                alert('Please upload an avatar image');
+                return;
+            }
+
+            document.getElementById('generateBtn').disabled = true;
+            document.getElementById('generateBtn').textContent = '⏳ Uploading avatar...';
+
+            try {
+                // Step 1: Upload avatar image
+                const formData = new FormData();
+                formData.append('file', avatarFile);
+                formData.append('api_key', apiKey);
+
+                const uploadResponse = await fetch('/api/upload-avatar', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const uploadData = await uploadResponse.json();
+                if (uploadData.error) throw new Error(uploadData.error);
+
+                document.getElementById('generateBtn').textContent = '⏳ Generating videos...';
+
+                // Step 2: Generate videos with uploaded avatar
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        api_key: apiKey, 
+                        script: script,
+                        avatar_url: uploadData.avatar_url
+                    })
+                });
+
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+
+                currentBatchId = data.batch_id;
+                displayJobs(data.jobs);
+                document.getElementById('progressSection').classList.remove('hidden');
+                
+                // Start polling for status
+                pollInterval = setInterval(() => pollStatus(apiKey), 5000);
+                pollStatus(apiKey); // First check immediately
+                
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                document.getElementById('generateBtn').disabled = false;
+                document.getElementById('generateBtn').textContent = '🚀 Generate Videos';
+            }
+        }
+
+        async function pollStatus(apiKey) {
+            if (!currentBatchId) return;
+
+            try {
+                const response = await fetch(`/api/status/${currentBatchId}?api_key=${apiKey}`);
+                const data = await response.json();
+                
+                if (data.jobs) {
+                    displayJobs(data.jobs);
+                    updateStats(data.jobs);
+
+                    // Check if all done
+                    const allDone = data.jobs.every(j => j.status === 'completed' || j.status === 'failed');
+                    if (allDone) {
+                        clearInterval(pollInterval);
+                        document.getElementById('downloadBtn').classList.remove('hidden');
+                        document.getElementById('generateBtn').disabled = false;
+                        document.getElementById('generateBtn').textContent = '🚀 Generate Videos';
+                    }
+                }
+            } catch (error) {
+                console.error('Poll error:', error);
+            }
+        }
+
+        function displayJobs(jobs) {
+            const container = document.getElementById('jobList');
+            container.innerHTML = jobs.map(job => `
+                <div class="job">
+                    <div class="job-label">${job.label}</div>
+                    <div class="job-status status-${job.status}">${job.status}</div>
+                </div>
+            `).join('');
+        }
+
+        function updateStats(jobs) {
+            const total = jobs.length;
+            const completed = jobs.filter(j => j.status === 'completed').length;
+            const failed = jobs.filter(j => j.status === 'failed').length;
+
+            document.getElementById('totalJobs').textContent = total;
+            document.getElementById('completedJobs').textContent = completed;
+            document.getElementById('failedJobs').textContent = failed;
+
+            const progress = (completed + failed) / total * 100;
+            document.getElementById('progressFill').style.width = `${progress}%`;
+        }
+
+        async function downloadBatch() {
+            if (!currentBatchId) return;
+            
+            document.getElementById('downloadBtn').disabled = true;
+            document.getElementById('downloadBtn').textContent = '⏳ Preparing ZIP...';
+
+            try {
+                const response = await fetch(`/api/download/${currentBatchId}`, {
+                    method: 'POST'
+                });
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `veo3_batch_${currentBatchId}.zip`;
+                a.click();
+
+                document.getElementById('downloadBtn').disabled = false;
+                document.getElementById('downloadBtn').textContent = '📥 Download All Videos';
+            } catch (error) {
+                alert(`Download error: ${error.message}`);
+                document.getElementById('downloadBtn').disabled = false;
+                document.getElementById('downloadBtn').textContent = '📥 Download All Videos';
+            }
+        }
+    </script>
+</body>
+</html>
