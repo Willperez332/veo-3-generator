@@ -251,7 +251,7 @@
             margin-bottom: 12px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
             transition: all 0.3s;
         }
         
@@ -281,6 +281,16 @@
         }
         .status-completed { background: #10b981; color: white; }
         .status-failed { background: #ef4444; color: white; }
+        
+        .job-error {
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid #ef4444;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #ff8080;
+        }
         
         @keyframes pulse {
             0%, 100% { opacity: 1; }
@@ -523,6 +533,10 @@ NO CAPTIONS ON SCREEN..."></textarea>
                 document.getElementById('batchManager').classList.remove('hidden');
                 updateBatchManager();
                 
+                // Re-enable button immediately so user can start another batch
+                document.getElementById('generateBtn').disabled = false;
+                document.getElementById('generateBtn').textContent = '🚀 Generate Videos';
+                
                 // Start polling
                 if (pollInterval) clearInterval(pollInterval);
                 pollInterval = setInterval(() => pollStatus(apiKey), 5000);
@@ -558,8 +572,6 @@ NO CAPTIONS ON SCREEN..."></textarea>
                         localStorage.setItem('veo_batches', JSON.stringify(activeBatches));
                         updateBatchManager();
                         document.getElementById('downloadBtn').classList.remove('hidden');
-                        document.getElementById('generateBtn').disabled = false;
-                        document.getElementById('generateBtn').textContent = '🚀 Generate Videos';
                     }
                 }
             } catch (error) {
@@ -569,12 +581,27 @@ NO CAPTIONS ON SCREEN..."></textarea>
 
         function displayJobs(jobs) {
             const container = document.getElementById('jobList');
-            container.innerHTML = jobs.map(job => `
-                <div class="job">
-                    <div class="job-label">${job.label}</div>
-                    <div class="job-status status-${job.status}">${job.status}</div>
-                </div>
-            `).join('');
+            container.innerHTML = jobs.map(job => {
+                let statusText = job.status;
+                if (job.retry_count && job.retry_count > 0 && job.status !== 'completed') {
+                    statusText = `${job.status} (Retry ${job.retry_count}/${job.max_retries})`;
+                }
+                
+                let errorHtml = '';
+                if (job.error && job.status === 'failed') {
+                    errorHtml = `<div class="job-error">⚠️ ${job.error}</div>`;
+                }
+                
+                return `
+                    <div class="job">
+                        <div>
+                            <div class="job-label">${job.label}</div>
+                            ${errorHtml}
+                        </div>
+                        <div class="job-status status-${job.status}">${statusText}</div>
+                    </div>
+                `;
+            }).join('');
         }
 
         function updateStats(jobs) {

@@ -21,12 +21,36 @@ Path(app.config['OUTPUT_FOLDER']).mkdir(exist_ok=True)
 # Kie AI API endpoint
 KIE_API_BASE = "https://api.kie.ai/api/v1"
 
+# Error message mappings for user-friendly guidance
+ERROR_MESSAGES = {
+    'public_error_prominent_people_filter_failed': 'Please verify or edit any celebrity/public figure names',
+    'public_error_violence_filter_failed': 'Content contains violence or harmful themes - please revise',
+    'public_error_nsfw_filter_failed': 'Content flagged as inappropriate - please revise',
+    'public_error_copyrighted_material': 'Content may include copyrighted material - please revise',
+    'public_error_prompt_too_long': 'Prompt is too long - please shorten the text',
+    'public_error_invalid_image': 'Image format or quality issue - please try a different image',
+}
+
+def parse_error_message(error_msg):
+    """Convert API error codes to user-friendly messages"""
+    if not error_msg:
+        return "Unknown error occurred"
+    
+    # Check for known error patterns
+    for error_code, friendly_msg in ERROR_MESSAGES.items():
+        if error_code in error_msg.lower():
+            return friendly_msg
+    
+    # Return original message if no match
+    return error_msg
+
 def parse_script(script_text):
-    """Parse formatted script into segments"""
+    """Parse formatted script into segments - matches ANY label"""
     segments = []
-    # Updated pattern to capture "HOLDING PRODUCT" marker
-    pattern = r'(Backend \d+|Hook)(\s*—\s*HOLDING PRODUCT)?\s*\n(.*?)(?=\n(?:Backend \d+|Hook)|$)'
-    matches = re.findall(pattern, script_text, re.DOTALL)
+    # Updated pattern to match any segment label (HOOK, HOOK V2, Backend 1, etc.)
+    # Captures: segment label, optional "— HOLDING PRODUCT" marker, and the prompt text
+    pattern = r'^([A-Z][A-Za-z0-9\s]+?)(\s*—\s*HOLDING PRODUCT)?\s*\n(.*?)(?=\n^[A-Z][A-Za-z0-9\s]+?(?:\s*—\s*HOLDING PRODUCT)?\s*\n|\Z)'
+    matches = re.findall(pattern, script_text, re.DOTALL | re.MULTILINE)
     
     for label, holding_product, prompt in matches:
         segments.append({
@@ -80,49 +104,70 @@ def generate_video(api_key, prompt, image_url=None, aspect_ratio="9:16"):
     else:
         data['generationType'] = 'TEXT_2_VIDEO'
     
-    response = requests.post(url, headers=headers, json=data)
-    response.raise_for_status()
-    result = response.json()
-    
-    if result.get('code') == 200:
-        return result.get('data', {}).get('taskId')
-    else:
-        raise Exception(f"API Error: {result.get('msg')}")
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        result = response.json()
+        
+        if result.get('code') == 200:
+            return {'success': True, 'task_id': result.get('data', {}).get('taskId')}
+        else:
+            error_msg = result.get('msg', 'Unknown error')
+            return {'success': False, 'error': error_msg}
+    except requests.exceptions.HTTPError as e:
+        # Handle HTTP errors (400, 500, etc.)
+        try:
+            error_data = e.response.json()
+            error_msg = error_data.get('msg', str(e))
+        except:
+            error_msg = str(e)
+        return {'success': False, 'error': f"HTTP {e.response.status_code}: {error_msg}"}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 def check_status(api_key, task_id):
     """Check generation status"""
     url = f"{KIE_API_BASE}/veo/record-info"
     headers = {'Authorization': f'Bearer {api_key}'}
     params = {'taskId': task_id}
-    response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()
-    result = response.json()
     
-    if result.get('code') == 200:
-        data = result.get('data', {})
-        success_flag = data.get('successFlag')
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        result = response.json()
         
-        # Map successFlag to status
-        status_map = {
-            0: 'generating',
-            1: 'completed',
-            2: 'failed',
-            3: 'failed'
-        }
-        
-        video_url = None
-        if success_flag == 1 and data.get('response'):
-            response_data = data['response']
-            if response_data.get('resultUrls'):
-                video_url = response_data['resultUrls'][0]
-        
-        return {
-            'status': status_map.get(success_flag, 'unknown'),
-            'video_url': video_url,
-            'error': data.get('errorMessage') if success_flag in [2, 3] else None
-        }
-    else:
-        return {'status': 'failed', 'error': result.get('msg')}
+        if result.get('code') == 200:
+            data = result.get('data', {})
+            success_flag = data.get('successFlag')
+            
+            # Map successFlag to status
+            status_map = {
+                0: 'generating',
+                1: 'completed',
+                2: 'failed',
+                3: 'failed'
+            }
+            
+            video_url = None
+            error_msg = None
+            
+            if success_flag == 1 and data.get('response'):
+                response_data = data['response']
+                if response_data.get('resultUrls'):
+                    video_url = response_data['resultUrls'][0]
+            
+            if success_flag in [2, 3]:
+                error_msg = data.get('errorMessage', 'Generation failed')
+            
+            return {
+                'status': status_map.get(success_flag, 'unknown'),
+                'video_url': video_url,
+                'error': error_msg
+            }
+        else:
+            return {'status': 'failed', 'error': result.get('msg')}
+    except Exception as e:
+        return {'status': 'failed', 'error': str(e)}
 
 def download_video(video_url, output_path):
     """Download generated video"""
@@ -177,73 +222,80 @@ def generate():
         return jsonify({'error': 'Missing API key, script, or normal avatar URL'}), 400
     
     segments = parse_script(script)
+    
+    if not segments:
+        return jsonify({'error': 'No segments found in script. Make sure each segment starts with a label (HOOK, Backend 1, etc.)'}), 400
+    
     jobs = []
     
     # Generate videos for each segment
     for seg in segments:
+        # Determine which avatar to use
         if seg['holding_product']:
-            # HOLDING PRODUCT segment - use product avatar if available
             if avatar_product_url:
-                try:
-                    task_id = generate_video(api_key, seg['prompt'], avatar_product_url)
-                    jobs.append({
-                        'label': f"{seg['label']} (With Product)",
-                        'task_id': task_id,
-                        'status': 'queued',
-                        'type': 'product'
-                    })
-                except Exception as e:
-                    jobs.append({
-                        'label': f"{seg['label']} (With Product)",
-                        'error': str(e),
-                        'status': 'failed',
-                        'type': 'product'
-                    })
+                avatar_url = avatar_product_url
+                label_suffix = " (With Product)"
             else:
-                # No product avatar uploaded - skip or warn
+                # No product avatar uploaded - skip with error
                 jobs.append({
                     'label': f"{seg['label']} (With Product)",
                     'error': 'No product avatar uploaded',
                     'status': 'failed',
-                    'type': 'product'
+                    'retry_count': 0,
+                    'max_retries': 3
                 })
+                continue
         else:
-            # Normal segment - use normal avatar
-            try:
-                task_id = generate_video(api_key, seg['prompt'], avatar_normal_url)
-                jobs.append({
-                    'label': f"{seg['label']}",
-                    'task_id': task_id,
-                    'status': 'queued',
-                    'type': 'normal'
-                })
-            except Exception as e:
-                jobs.append({
-                    'label': f"{seg['label']}",
-                    'error': str(e),
-                    'status': 'failed',
-                    'type': 'normal'
-                })
+            avatar_url = avatar_normal_url
+            label_suffix = ""
+        
+        # Attempt to generate video
+        result = generate_video(api_key, seg['prompt'], avatar_url)
+        
+        if result['success']:
+            jobs.append({
+                'label': f"{seg['label']}{label_suffix}",
+                'task_id': result['task_id'],
+                'status': 'queued',
+                'prompt': seg['prompt'],
+                'avatar_url': avatar_url,
+                'retry_count': 0,
+                'max_retries': 3
+            })
+        else:
+            # Initial generation failed
+            jobs.append({
+                'label': f"{seg['label']}{label_suffix}",
+                'error': parse_error_message(result['error']),
+                'raw_error': result['error'],
+                'status': 'failed',
+                'prompt': seg['prompt'],
+                'avatar_url': avatar_url,
+                'retry_count': 0,
+                'max_retries': 3
+            })
     
     # Save job batch
-    batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    batch_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     batch_file = Path(app.config['OUTPUT_FOLDER']) / f"batch_{batch_id}.json"
     with open(batch_file, 'w') as f:
-        json.dump(jobs, f, indent=2)
+        json.dump({'api_key': api_key, 'jobs': jobs}, f, indent=2)
     
     return jsonify({'batch_id': batch_id, 'jobs': jobs})
 
 @app.route('/api/status/<batch_id>', methods=['GET'])
 def status(batch_id):
-    """Check batch status"""
+    """Check batch status and handle retries"""
     batch_file = Path(app.config['OUTPUT_FOLDER']) / f"batch_{batch_id}.json"
     if not batch_file.exists():
         return jsonify({'error': 'Batch not found'}), 404
     
     with open(batch_file, 'r') as f:
-        jobs = json.load(f)
+        batch_data = json.load(f)
     
-    api_key = request.args.get('api_key')
+    jobs = batch_data.get('jobs', [])
+    api_key = batch_data.get('api_key') or request.args.get('api_key')
+    
     if not api_key:
         return jsonify({'error': 'Missing API key'}), 400
     
@@ -253,14 +305,45 @@ def status(batch_id):
             try:
                 result = check_status(api_key, job['task_id'])
                 job['status'] = result.get('status', 'unknown')
+                
                 if result.get('video_url'):
                     job['video_url'] = result['video_url']
+                
+                # Handle failed jobs with retry logic
+                if job['status'] == 'failed':
+                    job['raw_error'] = result.get('error', 'Unknown error')
+                    job['error'] = parse_error_message(job['raw_error'])
+                    
+                    # Attempt retry if under max retries
+                    retry_count = job.get('retry_count', 0)
+                    max_retries = job.get('max_retries', 3)
+                    
+                    if retry_count < max_retries:
+                        # Retry generation
+                        retry_result = generate_video(
+                            api_key, 
+                            job['prompt'], 
+                            job['avatar_url']
+                        )
+                        
+                        if retry_result['success']:
+                            job['task_id'] = retry_result['task_id']
+                            job['status'] = 'queued'
+                            job['retry_count'] = retry_count + 1
+                            job['error'] = None
+                            job['raw_error'] = None
+                        else:
+                            job['retry_count'] = retry_count + 1
+                            job['raw_error'] = retry_result['error']
+                            job['error'] = parse_error_message(retry_result['error'])
+                            if job['retry_count'] >= max_retries:
+                                job['error'] = f"Failed after {max_retries} attempts: {job['error']}"
             except Exception as e:
                 job['error'] = str(e)
     
     # Save updated status
     with open(batch_file, 'w') as f:
-        json.dump(jobs, f, indent=2)
+        json.dump(batch_data, f, indent=2)
     
     return jsonify({'jobs': jobs})
 
@@ -272,7 +355,9 @@ def download_batch(batch_id):
         return jsonify({'error': 'Batch not found'}), 404
     
     with open(batch_file, 'r') as f:
-        jobs = json.load(f)
+        batch_data = json.load(f)
+    
+    jobs = batch_data.get('jobs', [])
     
     # Download all completed videos
     video_files = []
@@ -285,6 +370,9 @@ def download_batch(batch_id):
                 video_files.append(filepath)
             except Exception as e:
                 print(f"Failed to download {filename}: {e}")
+    
+    if not video_files:
+        return jsonify({'error': 'No completed videos to download'}), 404
     
     # Create ZIP
     zip_path = Path(app.config['OUTPUT_FOLDER']) / f"batch_{batch_id}.zip"
