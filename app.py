@@ -170,55 +170,59 @@ def generate():
     data = request.json
     api_key = data.get('api_key')
     script = data.get('script')
-    avatar_url = data.get('avatar_url')
+    avatar_normal_url = data.get('avatar_normal_url')
+    avatar_product_url = data.get('avatar_product_url')
     
-    if not api_key or not script or not avatar_url:
-        return jsonify({'error': 'Missing API key, script, or avatar URL'}), 400
+    if not api_key or not script or not avatar_normal_url:
+        return jsonify({'error': 'Missing API key, script, or normal avatar URL'}), 400
     
     segments = parse_script(script)
     jobs = []
     
     # Generate videos for each segment
     for seg in segments:
-        # Always generate normal avatar version
-        try:
-            task_id = generate_video(api_key, seg['prompt'], avatar_url)
-            label = f"{seg['label']}"
-            if seg['holding_product']:
-                label += " — Normal"
-            
-            jobs.append({
-                'label': label,
-                'task_id': task_id,
-                'status': 'queued',
-                'type': 'normal'
-            })
-        except Exception as e:
-            jobs.append({
-                'label': f"{seg['label']} — Normal",
-                'error': str(e),
-                'status': 'failed',
-                'type': 'normal'
-            })
-        
-        # Generate product version ONLY if "HOLDING PRODUCT" marker present
         if seg['holding_product']:
-            try:
-                # Add instruction to hold product in prompt
-                product_prompt = f"{seg['prompt']} The avatar is holding a product in their hand."
-                task_id = generate_video(api_key, product_prompt, avatar_url)
+            # HOLDING PRODUCT segment - use product avatar if available
+            if avatar_product_url:
+                try:
+                    task_id = generate_video(api_key, seg['prompt'], avatar_product_url)
+                    jobs.append({
+                        'label': f"{seg['label']} (With Product)",
+                        'task_id': task_id,
+                        'status': 'queued',
+                        'type': 'product'
+                    })
+                except Exception as e:
+                    jobs.append({
+                        'label': f"{seg['label']} (With Product)",
+                        'error': str(e),
+                        'status': 'failed',
+                        'type': 'product'
+                    })
+            else:
+                # No product avatar uploaded - skip or warn
                 jobs.append({
-                    'label': f"{seg['label']} — With Product",
+                    'label': f"{seg['label']} (With Product)",
+                    'error': 'No product avatar uploaded',
+                    'status': 'failed',
+                    'type': 'product'
+                })
+        else:
+            # Normal segment - use normal avatar
+            try:
+                task_id = generate_video(api_key, seg['prompt'], avatar_normal_url)
+                jobs.append({
+                    'label': f"{seg['label']}",
                     'task_id': task_id,
                     'status': 'queued',
-                    'type': 'product'
+                    'type': 'normal'
                 })
             except Exception as e:
                 jobs.append({
-                    'label': f"{seg['label']} — With Product",
+                    'label': f"{seg['label']}",
                     'error': str(e),
                     'status': 'failed',
-                    'type': 'product'
+                    'type': 'normal'
                 })
     
     # Save job batch

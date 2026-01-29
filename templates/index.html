@@ -171,19 +171,35 @@
         </div>
 
         <div class="section">
-            <div class="section-title">2. Upload Avatar Image</div>
-            <input type="file" id="avatarFile" accept="image/*" style="
-                width: 100%;
-                padding: 12px;
-                background: #0a0a0a;
-                border: 1px solid #333;
-                border-radius: 8px;
-                color: #e0e0e0;
-                font-size: 14px;
-                cursor: pointer;
-            ">
+            <div class="section-title">2. Upload Avatar Images</div>
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 13px; font-weight: 500; margin-bottom: 8px; color: #ccc;">Normal Avatar (no product)</label>
+                <input type="file" id="avatarNormal" accept="image/*" style="
+                    width: 100%;
+                    padding: 12px;
+                    background: #0a0a0a;
+                    border: 1px solid #333;
+                    border-radius: 8px;
+                    color: #e0e0e0;
+                    font-size: 14px;
+                    cursor: pointer;
+                ">
+            </div>
+            <div>
+                <label style="display: block; font-size: 13px; font-weight: 500; margin-bottom: 8px; color: #ccc;">Product Avatar (holding product) - Optional</label>
+                <input type="file" id="avatarProduct" accept="image/*" style="
+                    width: 100%;
+                    padding: 12px;
+                    background: #0a0a0a;
+                    border: 1px solid #333;
+                    border-radius: 8px;
+                    color: #e0e0e0;
+                    font-size: 14px;
+                    cursor: pointer;
+                ">
+            </div>
             <div class="note">
-                Upload the avatar image to use in your videos (doctor, person, etc.)
+                Upload two versions of the avatar: one without product, one holding the product. Product avatar is only needed if you have "— HOLDING PRODUCT" segments.
             </div>
         </div>
 
@@ -204,8 +220,9 @@ NO CAPTIONS ON SCREEN. NO CAMERA MOVEMENTS. NO EDITS. NO BACKGROUND MUSIC. Handh
             <div class="note" style="margin-top: 16px;">
                 <strong>How it works:</strong>
                 <ul style="margin: 8px 0 0 20px; font-size: 13px; line-height: 1.6;">
-                    <li>Normal segments → 1 video (avatar only)</li>
-                    <li>Segments with "— HOLDING PRODUCT" → 2 videos (normal + with product)</li>
+                    <li>Normal segments → uses normal avatar image</li>
+                    <li>Segments with "— HOLDING PRODUCT" → uses product avatar image</li>
+                    <li>Each segment generates exactly 1 video with the correct avatar</li>
                 </ul>
             </div>
         </div>
@@ -252,45 +269,65 @@ NO CAPTIONS ON SCREEN. NO CAMERA MOVEMENTS. NO EDITS. NO BACKGROUND MUSIC. Handh
         async function startGeneration() {
             const apiKey = document.getElementById('apiKey').value;
             const script = document.getElementById('script').value;
-            const avatarFile = document.getElementById('avatarFile').files[0];
+            const avatarNormal = document.getElementById('avatarNormal').files[0];
+            const avatarProduct = document.getElementById('avatarProduct').files[0];
 
             if (!apiKey || !script) {
                 alert('Please provide API key and script');
                 return;
             }
 
-            if (!avatarFile) {
-                alert('Please upload an avatar image');
+            if (!avatarNormal) {
+                alert('Please upload the normal avatar image');
                 return;
             }
 
             document.getElementById('generateBtn').disabled = true;
-            document.getElementById('generateBtn').textContent = '⏳ Uploading avatar...';
+            document.getElementById('generateBtn').textContent = '⏳ Uploading avatars...';
 
             try {
-                // Step 1: Upload avatar image
-                const formData = new FormData();
-                formData.append('file', avatarFile);
-                formData.append('api_key', apiKey);
+                // Step 1: Upload normal avatar
+                const formDataNormal = new FormData();
+                formDataNormal.append('file', avatarNormal);
+                formDataNormal.append('api_key', apiKey);
 
-                const uploadResponse = await fetch('/api/upload-avatar', {
+                const uploadNormalResponse = await fetch('/api/upload-avatar', {
                     method: 'POST',
-                    body: formData
+                    body: formDataNormal
                 });
 
-                const uploadData = await uploadResponse.json();
-                if (uploadData.error) throw new Error(uploadData.error);
+                const uploadNormalData = await uploadNormalResponse.json();
+                if (uploadNormalData.error) throw new Error(uploadNormalData.error);
+
+                let avatarProductUrl = null;
+
+                // Step 2: Upload product avatar if provided
+                if (avatarProduct) {
+                    const formDataProduct = new FormData();
+                    formDataProduct.append('file', avatarProduct);
+                    formDataProduct.append('api_key', apiKey);
+
+                    const uploadProductResponse = await fetch('/api/upload-avatar', {
+                        method: 'POST',
+                        body: formDataProduct
+                    });
+
+                    const uploadProductData = await uploadProductResponse.json();
+                    if (uploadProductData.error) throw new Error(uploadProductData.error);
+                    avatarProductUrl = uploadProductData.avatar_url;
+                }
 
                 document.getElementById('generateBtn').textContent = '⏳ Generating videos...';
 
-                // Step 2: Generate videos with uploaded avatar
+                // Step 3: Generate videos with uploaded avatars
                 const response = await fetch('/api/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         api_key: apiKey, 
                         script: script,
-                        avatar_url: uploadData.avatar_url
+                        avatar_normal_url: uploadNormalData.avatar_url,
+                        avatar_product_url: avatarProductUrl
                     })
                 });
 
