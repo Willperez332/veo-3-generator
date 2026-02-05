@@ -505,7 +505,27 @@
                     <option value="a serious/warning tone">Serious/Warning</option>
                 </select>
 
-                <button onclick="generateChunks()">✂️ Generate Chunks</button>
+                <!-- AI Chunking Option -->
+                <div style="margin-top: 4px; margin-bottom: 16px; padding: 16px; background: #0a0a0a; border: 1px solid #333; border-radius: 12px;">
+                    <label style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 10px;">
+                        <input type="checkbox" id="useAI" checked style="width: 18px; height: 18px; accent-color: #E91E8C; cursor: pointer;">
+                        <span style="text-transform: none; letter-spacing: 0; font-size: 14px; color: #e0e0e0; font-weight: 600;">
+                            🧠 AI-Powered Chunking (Recommended)
+                        </span>
+                    </label>
+                    <p style="color: #666; font-size: 12px; margin-top: 8px; margin-left: 28px;">
+                        Uses Claude AI to intelligently split at semantic boundaries, keep cause→effect pairs together, and clean filler words.
+                    </p>
+                    <div id="aiKeySection" style="margin-top: 12px;">
+                        <label>Anthropic API Key</label>
+                        <input type="password" id="anthropicKey" placeholder="sk-ant-...">
+                        <p style="color: #666; font-size: 12px; margin-top: 4px;">
+                            Get yours at <a href="https://console.anthropic.com" target="_blank" style="color: #00D4E8;">console.anthropic.com</a>. Key is saved in your browser.
+                        </p>
+                    </div>
+                </div>
+
+                <button id="chunkBtn" onclick="generateChunks()">✂️ Generate Chunks</button>
 
                 <div id="chunksPreview" class="hidden">
                     <div class="section-title" style="margin-top: 20px;">Preview</div>
@@ -853,6 +873,22 @@ NO CAPTIONS ON SCREEN..."></textarea>
 
         // ========== Script Formatter Functions ==========
 
+        // Save/load Anthropic key
+        document.getElementById('anthropicKey').addEventListener('change', (e) => {
+            localStorage.setItem('anthropic_api_key', e.target.value);
+        });
+
+        // Toggle AI key section visibility
+        document.getElementById('useAI').addEventListener('change', (e) => {
+            document.getElementById('aiKeySection').style.display = e.target.checked ? 'block' : 'none';
+        });
+
+        // Load saved Anthropic key on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedAnthropicKey = localStorage.getItem('anthropic_api_key');
+            if (savedAnthropicKey) document.getElementById('anthropicKey').value = savedAnthropicKey;
+        });
+
         function toggleFormatter() {
             const content = document.getElementById('formatterContent');
             const btn = event.target;
@@ -865,60 +901,119 @@ NO CAPTIONS ON SCREEN..."></textarea>
             }
         }
 
-        function generateChunks() {
+        async function generateChunks() {
             const rawText = document.getElementById('rawTranscript').value.trim();
             const tonality = document.getElementById('tonality').value;
+            const useAI = document.getElementById('useAI').checked;
 
             if (!rawText) {
                 alert('Please paste a transcript first');
                 return;
             }
 
-            // Split into sentences (handle ., !, ?)
-            const sentences = rawText.match(/[^.!?]+[.!?]+/g) || [rawText];
+            if (useAI) {
+                await chunkWithAI(rawText, tonality);
+            } else {
+                chunkWithJS(rawText, tonality);
+            }
+        }
 
-            const chunks = [];
-            let currentChunk = [];
-            let currentWordCount = 0;
+        // ===== AI-Powered Chunking (calls backend → Claude API) =====
 
+        async function chunkWithAI(rawText, tonality) {
+            const apiKey = document.getElementById('anthropicKey').value.trim();
+
+            if (!apiKey) {
+                alert('Please enter your Anthropic API key for AI chunking, or uncheck "AI-Powered Chunking" to use basic mode.');
+                return;
+            }
+
+            const btn = document.getElementById('chunkBtn');
+            const originalText = btn.textContent;
+            btn.textContent = '🧠 AI is chunking...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/chunk-transcript', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        raw_text: rawText,
+                        tonality: tonality,
+                        api_key: apiKey
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert(`AI chunking error: ${data.error}`);
+                    return;
+                }
+
+                window.generatedChunks = data.chunks;
+                displayChunksPreview(data.chunks);
+
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // ===== Basic JS Chunking (fallback, no API needed) =====
+
+        function chunkWithJS(rawText, tonality) {
+            // Split into sentences
+            const rawSentences = rawText.match(/[^.!?]+[.!?]+/g) || [rawText];
+            const sentences = rawSentences.map(s => s.trim()).filter(s => s.length > 0);
+
+            // Group dependent sentences with their parent
+            // (sentences starting with "That means...", "It's...", "You need..." etc.)
+            const DEPENDENT = /^(That\s+(means|is|was|usually)|It'?s\s|You\s+need|This\s+(means|is|was)|Which\s+(means|is|usually))/i;
+
+            const grouped = [];
             for (const sentence of sentences) {
-                const trimmed = sentence.trim();
-                const words = trimmed.split(/\s+/);
-                const sentenceWordCount = words.length;
-
-                // If adding this sentence keeps us in acceptable range, add it
-                if (currentWordCount + sentenceWordCount <= 28) {
-                    currentChunk.push(trimmed);
-                    currentWordCount += sentenceWordCount;
+                if (grouped.length > 0 && DEPENDENT.test(sentence)) {
+                    grouped[grouped.length - 1] += ' ' + sentence;
                 } else {
-                    // Save current chunk if it has content
-                    if (currentChunk.length > 0) {
-                        chunks.push(currentChunk.join(' '));
-                    }
-                    // Start new chunk with this sentence
-                    currentChunk = [trimmed];
-                    currentWordCount = sentenceWordCount;
+                    grouped.push(sentence);
                 }
             }
 
-            // Don't forget the last chunk
-            if (currentChunk.length > 0) {
-                chunks.push(currentChunk.join(' '));
+            // Build chunks targeting 25-27 words
+            const chunks = [];
+            let current = [];
+            let count = 0;
+
+            for (const sentence of grouped) {
+                const wc = sentence.split(/\s+/).length;
+
+                if (count + wc <= 28) {
+                    current.push(sentence);
+                    count += wc;
+                } else {
+                    if (current.length > 0) chunks.push(current.join(' '));
+                    current = [sentence];
+                    count = wc;
+                }
+            }
+            if (current.length > 0) chunks.push(current.join(' '));
+
+            // Merge short final chunk (< 20 words) with previous
+            if (chunks.length > 1) {
+                const lastWC = chunks[chunks.length - 1].split(/\s+/).length;
+                if (lastWC < 20) {
+                    chunks[chunks.length - 2] += ' ' + chunks[chunks.length - 1];
+                    chunks.pop();
+                }
             }
 
-            // Format chunks with labels and prompts
+            // Label: HOOK + Backend 1, 2, 3... (NO HOOK V2)
             const formattedChunks = chunks.map((chunk, index) => {
-                let label;
-                if (index === 0) {
-                    label = 'HOOK';
-                } else if (index === 1 && chunks[0].split(/\s+/).length < 20) {
-                    label = 'HOOK V2';
-                } else {
-                    label = `Backend ${index}`;
-                }
-
+                const label = index === 0 ? 'HOOK' : `Backend ${index}`;
                 const wordCount = chunk.split(/\s+/).length;
-
                 return {
                     label,
                     text: chunk,
@@ -927,22 +1022,11 @@ NO CAPTIONS ON SCREEN..."></textarea>
                 };
             });
 
-            // Re-number backend labels sequentially
-            let backendNum = 1;
-            formattedChunks.forEach((chunk, index) => {
-                if (index > 0 && !chunk.label.includes('HOOK')) {
-                    chunk.label = `Backend ${backendNum}`;
-                    chunk.formatted = chunk.formatted.replace(/^Backend \d+/, `Backend ${backendNum}`);
-                    backendNum++;
-                }
-            });
-
-            // Store for later use
             window.generatedChunks = formattedChunks;
-
-            // Display preview
             displayChunksPreview(formattedChunks);
         }
+
+        // ===== Shared display/action functions =====
 
         function displayChunksPreview(chunks) {
             const container = document.getElementById('chunksList');

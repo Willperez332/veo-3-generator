@@ -12,6 +12,12 @@ from pathlib import Path
 import zipfile
 from datetime import datetime
 
+try:
+    import anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    HAS_ANTHROPIC = False
+
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'outputs'
@@ -381,6 +387,87 @@ def download_batch(batch_id):
             zipf.write(video_file, video_file.name)
     
     return send_file(zip_path, as_attachment=True)
+
+@app.route('/api/chunk-transcript', methods=['POST'])
+def chunk_transcript():
+    """Use Claude AI to intelligently chunk a raw transcript into Veo 3 segments"""
+    if not HAS_ANTHROPIC:
+        return jsonify({'error': 'Anthropic package not installed on server'}), 500
+
+    data = request.json
+    raw_text = data.get('raw_text', '').strip()
+    tonality = data.get('tonality', 'an informational tone')
+    api_key = data.get('api_key') or os.environ.get('ANTHROPIC_API_KEY')
+
+    if not raw_text:
+        return jsonify({'error': 'No transcript text provided'}), 400
+
+    if not api_key:
+        return jsonify({'error': 'Anthropic API key required for AI chunking'}), 400
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+
+        prompt = f"""You are a transcript chunker for short-form AI avatar videos. Split this raw transcript into video segments.
+
+STRICT RULES:
+1. Each chunk MUST be 25-27 words. Acceptable range: 23-28. Count words very carefully.
+2. Break ONLY at sentence endings — never mid-sentence.
+3. Keep cause→effect pairs together (e.g., "If you're yawning... that means iron deficiency" stays in one chunk).
+4. Keep related items or lists together when they fit.
+5. Remove verbal filler: "okay,", "well,", "you know", "like," — but preserve meaning and tone.
+6. If a chunk is slightly short, add brief natural transitions: "Now,", "First,", "For example,", "Next,".
+7. Lightly clean spoken language for clarity while keeping a conversational, natural tone.
+8. Label the first chunk "HOOK" — it should be the attention-grabbing opening.
+9. Label all remaining chunks "Backend 1", "Backend 2", "Backend 3", etc. in order.
+10. Do NOT create a "HOOK V2" label. Only "HOOK" and "Backend N".
+11. The last chunk must still be at least 23 words. Merge with the previous chunk if needed.
+12. Double-check every chunk's word count before returning.
+
+RAW TRANSCRIPT:
+\"\"\"{raw_text}\"\"\"
+
+Return ONLY a valid JSON array. Each element: {{"label": "...", "text": "..."}}
+No markdown, no code blocks, no explanation — just the raw JSON array."""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        response_text = message.content[0].text.strip()
+
+        # Handle potential markdown code block wrapping
+        if response_text.startswith('```'):
+            response_text = response_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+
+        chunks = json.loads(response_text)
+
+        # Format with Veo 3 prompt structure
+        formatted_chunks = []
+        for chunk in chunks:
+            text = chunk['text']
+            word_count = len(text.split())
+            label = chunk['label']
+
+            formatted_chunks.append({
+                'label': label,
+                'text': text,
+                'wordCount': word_count,
+                'formatted': f'{label}\nNO CAPTIONS ON SCREEN. NO CAMERA MOVEMENTS. NO EDITS. NO BACKGROUND MUSIC.\nHandheld phone video style, Make the avatar say in {tonality}:\n"{text}"'
+            })
+
+        return jsonify({'chunks': formatted_chunks})
+
+    except json.JSONDecodeError:
+        return jsonify({'error': 'AI returned invalid format. Please try again.'}), 500
+    except Exception as e:
+        error_msg = str(e)
+        if 'authentication' in error_msg.lower() or 'api key' in error_msg.lower():
+            return jsonify({'error': 'Invalid Anthropic API key'}), 401
+        return jsonify({'error': f'AI chunking failed: {error_msg}'}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8000)
