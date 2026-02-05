@@ -38,6 +38,13 @@ app.config['OUTPUT_FOLDER'] = 'outputs'
 Path(app.config['UPLOAD_FOLDER']).mkdir(exist_ok=True)
 Path(app.config['OUTPUT_FOLDER']).mkdir(exist_ok=True)
 
+def clean_api_key(key):
+    """Strip invisible Unicode chars that sneak in when pasting into env var UIs"""
+    if not key:
+        return key
+    # Keep only printable ASCII (API keys are always ASCII)
+    return ''.join(c for c in key.strip() if 32 <= ord(c) < 127)
+
 # Kie AI API endpoint
 KIE_API_BASE = "https://api.kie.ai/api/v1"
 
@@ -539,7 +546,7 @@ def extract_transcript():
     """Extract transcript from a video URL"""
     data = request.json
     url = data.get('url', '').strip()
-    openai_api_key = os.environ.get('OPENAI_API_KEY')
+    openai_api_key = clean_api_key(os.environ.get('OPENAI_API_KEY'))
 
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
@@ -564,7 +571,7 @@ def chunk_transcript():
     data = request.json
     raw_text = data.get('raw_text', '').strip()
     tonality = data.get('tonality', 'an informational tone')
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    api_key = clean_api_key(os.environ.get('ANTHROPIC_API_KEY'))
 
     if not raw_text:
         return jsonify({'error': 'No transcript text provided'}), 400
