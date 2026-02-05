@@ -344,6 +344,105 @@
             margin-top: 20px;
             background: linear-gradient(135deg, #10b981, #00D4E8);
         }
+
+        /* Script Formatter Styles */
+        .toggle-btn {
+            background: #2a2a2a;
+            color: #888;
+            padding: 12px 20px;
+            font-size: 14px;
+            text-transform: none;
+            letter-spacing: 0;
+            box-shadow: none;
+            width: 100%;
+        }
+
+        .toggle-btn:hover {
+            background: #333;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .chunk-card {
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .chunk-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .chunk-label {
+            font-weight: 700;
+            color: #00D4E8;
+            font-size: 14px;
+        }
+
+        .chunk-word-count {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .word-count-good {
+            background: #10b981;
+            color: white;
+        }
+
+        .word-count-warn {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .word-count-bad {
+            background: #ef4444;
+            color: white;
+        }
+
+        .chunk-text {
+            color: #ccc;
+            font-size: 14px;
+            line-height: 1.5;
+            font-style: italic;
+        }
+
+        #rawTranscript {
+            min-height: 150px;
+        }
+
+        select {
+            width: 100%;
+            padding: 14px;
+            background: #0a0a0a;
+            border: 2px solid #333;
+            border-radius: 12px;
+            color: #e0e0e0;
+            font-size: 14px;
+            margin-bottom: 16px;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #E91E8C;
+        }
+
+        .formatter-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .formatter-actions button {
+            flex: 1;
+        }
     </style>
 </head>
 <body>
@@ -378,6 +477,59 @@
                 </div>
                 <div class="note">
                     Upload two versions: one without product, one holding it. Product avatar only needed for segments marked <strong>"— HOLDING PRODUCT"</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📝 Script Formatter (Optional)</div>
+            <p style="color: #888; font-size: 13px; margin-bottom: 16px;">
+                Paste a raw transcript and we'll automatically chunk it into Veo 3-ready prompts.
+            </p>
+
+            <button class="toggle-btn" onclick="toggleFormatter()">
+                ▼ Open Script Formatter
+            </button>
+
+            <div id="formatterContent" class="hidden">
+                <div style="margin-top: 16px;">
+                    <label>Raw Transcript</label>
+                    <textarea id="rawTranscript" placeholder="Paste your raw transcript here..."></textarea>
+                </div>
+
+                <label style="margin-top: 16px;">Tonality</label>
+                <select id="tonality">
+                    <option value="an informational tone">Informational (default)</option>
+                    <option value="an urgent/concerned tone">Urgent/Concerned</option>
+                    <option value="an excited tone">Excited</option>
+                    <option value="a serious/warning tone">Serious/Warning</option>
+                </select>
+
+                <button onclick="generateChunks()">✂️ Generate Chunks</button>
+
+                <div id="chunksPreview" class="hidden">
+                    <div class="section-title" style="margin-top: 20px;">Preview</div>
+                    <div id="chunksList"></div>
+
+                    <div class="stats" style="margin-top: 16px;">
+                        <div class="stat-item">
+                            <span>Chunks:</span>
+                            <span class="stat-value" id="chunkCount">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Total Words:</span>
+                            <span class="stat-value" id="totalWords">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span>Avg Words/Chunk:</span>
+                            <span class="stat-value" id="avgWords">0</span>
+                        </div>
+                    </div>
+
+                    <div class="formatter-actions">
+                        <button onclick="copyChunks()">📋 Copy All</button>
+                        <button onclick="useChunks()">⬇️ Use in Script Field</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -674,7 +826,7 @@ NO CAPTIONS ON SCREEN..."></textarea>
 
         async function downloadBatch() {
             if (!currentBatchId) return;
-            
+
             document.getElementById('downloadBtn').disabled = true;
             document.getElementById('downloadBtn').textContent = '⏳ Preparing ZIP...';
 
@@ -697,6 +849,147 @@ NO CAPTIONS ON SCREEN..."></textarea>
                 document.getElementById('downloadBtn').disabled = false;
                 document.getElementById('downloadBtn').textContent = '📥 Download All Videos';
             }
+        }
+
+        // ========== Script Formatter Functions ==========
+
+        function toggleFormatter() {
+            const content = document.getElementById('formatterContent');
+            const btn = event.target;
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                btn.textContent = '▲ Close Script Formatter';
+            } else {
+                content.classList.add('hidden');
+                btn.textContent = '▼ Open Script Formatter';
+            }
+        }
+
+        function generateChunks() {
+            const rawText = document.getElementById('rawTranscript').value.trim();
+            const tonality = document.getElementById('tonality').value;
+
+            if (!rawText) {
+                alert('Please paste a transcript first');
+                return;
+            }
+
+            // Split into sentences (handle ., !, ?)
+            const sentences = rawText.match(/[^.!?]+[.!?]+/g) || [rawText];
+
+            const chunks = [];
+            let currentChunk = [];
+            let currentWordCount = 0;
+
+            for (const sentence of sentences) {
+                const trimmed = sentence.trim();
+                const words = trimmed.split(/\s+/);
+                const sentenceWordCount = words.length;
+
+                // If adding this sentence keeps us in acceptable range, add it
+                if (currentWordCount + sentenceWordCount <= 28) {
+                    currentChunk.push(trimmed);
+                    currentWordCount += sentenceWordCount;
+                } else {
+                    // Save current chunk if it has content
+                    if (currentChunk.length > 0) {
+                        chunks.push(currentChunk.join(' '));
+                    }
+                    // Start new chunk with this sentence
+                    currentChunk = [trimmed];
+                    currentWordCount = sentenceWordCount;
+                }
+            }
+
+            // Don't forget the last chunk
+            if (currentChunk.length > 0) {
+                chunks.push(currentChunk.join(' '));
+            }
+
+            // Format chunks with labels and prompts
+            const formattedChunks = chunks.map((chunk, index) => {
+                let label;
+                if (index === 0) {
+                    label = 'HOOK';
+                } else if (index === 1 && chunks[0].split(/\s+/).length < 20) {
+                    label = 'HOOK V2';
+                } else {
+                    label = `Backend ${index}`;
+                }
+
+                const wordCount = chunk.split(/\s+/).length;
+
+                return {
+                    label,
+                    text: chunk,
+                    wordCount,
+                    formatted: `${label}\nNO CAPTIONS ON SCREEN. NO CAMERA MOVEMENTS. NO EDITS. NO BACKGROUND MUSIC.\nHandheld phone video style, Make the avatar say in ${tonality}:\n"${chunk}"`
+                };
+            });
+
+            // Re-number backend labels sequentially
+            let backendNum = 1;
+            formattedChunks.forEach((chunk, index) => {
+                if (index > 0 && !chunk.label.includes('HOOK')) {
+                    chunk.label = `Backend ${backendNum}`;
+                    chunk.formatted = chunk.formatted.replace(/^Backend \d+/, `Backend ${backendNum}`);
+                    backendNum++;
+                }
+            });
+
+            // Store for later use
+            window.generatedChunks = formattedChunks;
+
+            // Display preview
+            displayChunksPreview(formattedChunks);
+        }
+
+        function displayChunksPreview(chunks) {
+            const container = document.getElementById('chunksList');
+            const totalWords = chunks.reduce((sum, c) => sum + c.wordCount, 0);
+            const avgWords = (totalWords / chunks.length).toFixed(1);
+
+            container.innerHTML = chunks.map(chunk => {
+                let wordCountClass = 'word-count-good';
+                if (chunk.wordCount < 23 || chunk.wordCount > 28) {
+                    wordCountClass = 'word-count-bad';
+                } else if (chunk.wordCount < 25 || chunk.wordCount > 27) {
+                    wordCountClass = 'word-count-warn';
+                }
+
+                return `
+                    <div class="chunk-card">
+                        <div class="chunk-header">
+                            <span class="chunk-label">${chunk.label}</span>
+                            <span class="chunk-word-count ${wordCountClass}">${chunk.wordCount} words</span>
+                        </div>
+                        <div class="chunk-text">"${chunk.text}"</div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('chunkCount').textContent = chunks.length;
+            document.getElementById('totalWords').textContent = totalWords;
+            document.getElementById('avgWords').textContent = avgWords;
+            document.getElementById('chunksPreview').classList.remove('hidden');
+        }
+
+        function copyChunks() {
+            if (!window.generatedChunks) return;
+            const fullText = window.generatedChunks.map(c => c.formatted).join('\n\n');
+            navigator.clipboard.writeText(fullText);
+            alert('Copied to clipboard!');
+        }
+
+        function useChunks() {
+            if (!window.generatedChunks) return;
+            const fullText = window.generatedChunks.map(c => c.formatted).join('\n\n');
+            document.getElementById('script').value = fullText;
+
+            // Collapse formatter and scroll to script section
+            document.getElementById('formatterContent').classList.add('hidden');
+            document.querySelector('.toggle-btn').textContent = '▼ Open Script Formatter';
+            document.getElementById('script').scrollIntoView({ behavior: 'smooth' });
         }
     </script>
 </body>
