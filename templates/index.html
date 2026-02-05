@@ -96,6 +96,7 @@
         }
         
         input[type="password"],
+        input[type="text"],
         input[type="file"],
         textarea {
             width: 100%;
@@ -443,6 +444,69 @@
         .formatter-actions button {
             flex: 1;
         }
+
+        .mode-toggle {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .mode-btn {
+            background: #2a2a2a;
+            color: #888;
+            padding: 10px 20px;
+            font-size: 13px;
+            text-transform: none;
+            letter-spacing: 0;
+            box-shadow: none;
+            flex: 1;
+        }
+
+        .mode-btn:hover {
+            background: #333;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, #E91E8C 0%, #8B5CF6 100%);
+            color: white;
+        }
+
+        .url-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .url-input-row input {
+            flex: 1;
+        }
+
+        .url-input-row button {
+            white-space: nowrap;
+            padding: 14px 20px;
+            font-size: 13px;
+        }
+
+        .extract-method {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        .method-subtitles {
+            background: #10b981;
+            color: white;
+        }
+
+        .method-whisper {
+            background: #8B5CF6;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -492,9 +556,43 @@
             </button>
 
             <div id="formatterContent" class="hidden">
-                <div style="margin-top: 16px;">
+                <!-- Input Mode Toggle -->
+                <div class="mode-toggle" style="margin-top: 16px;">
+                    <button class="mode-btn active" id="modeText" onclick="switchInputMode('text')">📝 Paste Text</button>
+                    <button class="mode-btn" id="modeUrl" onclick="switchInputMode('url')">🔗 Extract from URL</button>
+                </div>
+
+                <!-- Paste Text Mode (default) -->
+                <div id="inputText">
                     <label>Raw Transcript</label>
                     <textarea id="rawTranscript" placeholder="Paste your raw transcript here..."></textarea>
+                </div>
+
+                <!-- URL Extraction Mode -->
+                <div id="inputUrl" class="hidden">
+                    <label>Video URL</label>
+                    <div class="url-input-row">
+                        <input type="text" id="videoUrl" placeholder="https://www.tiktok.com/@user/video/...">
+                        <button onclick="extractTranscript()" id="extractBtn">🔍 Extract</button>
+                    </div>
+                    <p style="color: #666; font-size: 12px; margin-top: 6px;">
+                        Supports TikTok, YouTube Shorts, and Instagram Reels
+                    </p>
+
+                    <!-- OpenAI key for Whisper fallback -->
+                    <div style="margin-top: 12px; padding: 12px; background: #111; border: 1px solid #2a2a2a; border-radius: 8px;">
+                        <label style="font-size: 11px;">OpenAI API Key (Whisper fallback — only needed if video has no captions)</label>
+                        <input type="password" id="openaiKey" placeholder="sk-...">
+                        <p style="color: #555; font-size: 11px; margin-top: 4px;">
+                            Get yours at <a href="https://platform.openai.com" target="_blank" style="color: #00D4E8;">platform.openai.com</a>
+                        </p>
+                    </div>
+
+                    <!-- Extraction result -->
+                    <div id="extractResult" class="hidden" style="margin-top: 12px;">
+                        <label>Extracted Transcript <span id="extractMethod"></span></label>
+                        <textarea id="extractedText" style="min-height: 120px;"></textarea>
+                    </div>
                 </div>
 
                 <label style="margin-top: 16px;">Tonality</label>
@@ -873,9 +971,12 @@ NO CAPTIONS ON SCREEN..."></textarea>
 
         // ========== Script Formatter Functions ==========
 
-        // Save/load Anthropic key
+        // Save/load API keys
         document.getElementById('anthropicKey').addEventListener('change', (e) => {
             localStorage.setItem('anthropic_api_key', e.target.value);
+        });
+        document.getElementById('openaiKey').addEventListener('change', (e) => {
+            localStorage.setItem('openai_api_key', e.target.value);
         });
 
         // Toggle AI key section visibility
@@ -883,11 +984,76 @@ NO CAPTIONS ON SCREEN..."></textarea>
             document.getElementById('aiKeySection').style.display = e.target.checked ? 'block' : 'none';
         });
 
-        // Load saved Anthropic key on page load
+        // Load saved keys on page load
         window.addEventListener('DOMContentLoaded', () => {
             const savedAnthropicKey = localStorage.getItem('anthropic_api_key');
             if (savedAnthropicKey) document.getElementById('anthropicKey').value = savedAnthropicKey;
+            const savedOpenaiKey = localStorage.getItem('openai_api_key');
+            if (savedOpenaiKey) document.getElementById('openaiKey').value = savedOpenaiKey;
         });
+
+        // ===== Input Mode Switching =====
+
+        function switchInputMode(mode) {
+            document.getElementById('inputText').classList.toggle('hidden', mode !== 'text');
+            document.getElementById('inputUrl').classList.toggle('hidden', mode !== 'url');
+            document.getElementById('modeText').classList.toggle('active', mode === 'text');
+            document.getElementById('modeUrl').classList.toggle('active', mode === 'url');
+        }
+
+        // ===== URL Transcript Extraction =====
+
+        async function extractTranscript() {
+            const url = document.getElementById('videoUrl').value.trim();
+            const openaiKey = document.getElementById('openaiKey').value.trim();
+
+            if (!url) {
+                alert('Please paste a video URL');
+                return;
+            }
+
+            const btn = document.getElementById('extractBtn');
+            btn.textContent = '⏳ Extracting...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/extract-transcript', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: url,
+                        openai_api_key: openaiKey || null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert(`Extraction error: ${data.error}`);
+                    return;
+                }
+
+                // Show extracted text
+                document.getElementById('extractedText').value = data.transcript;
+
+                const methodEl = document.getElementById('extractMethod');
+                if (data.method === 'whisper') {
+                    methodEl.innerHTML = '<span class="extract-method method-whisper">✨ Whisper AI</span>';
+                } else {
+                    methodEl.innerHTML = '<span class="extract-method method-subtitles">📝 Video Captions</span>';
+                }
+                document.getElementById('extractResult').classList.remove('hidden');
+
+                // Also populate rawTranscript so chunking works from either mode
+                document.getElementById('rawTranscript').value = data.transcript;
+
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            } finally {
+                btn.textContent = '🔍 Extract';
+                btn.disabled = false;
+            }
+        }
 
         function toggleFormatter() {
             const content = document.getElementById('formatterContent');
@@ -902,12 +1068,20 @@ NO CAPTIONS ON SCREEN..."></textarea>
         }
 
         async function generateChunks() {
-            const rawText = document.getElementById('rawTranscript').value.trim();
+            let rawText = document.getElementById('rawTranscript').value.trim();
             const tonality = document.getElementById('tonality').value;
             const useAI = document.getElementById('useAI').checked;
 
+            // Also check extracted text if URL mode was used
             if (!rawText) {
-                alert('Please paste a transcript first');
+                const extractedEl = document.getElementById('extractedText');
+                if (extractedEl && extractedEl.value.trim()) {
+                    rawText = extractedEl.value.trim();
+                }
+            }
+
+            if (!rawText) {
+                alert('Please paste a transcript or extract one from a URL first');
                 return;
             }
 

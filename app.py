@@ -6,6 +6,8 @@ import os
 import re
 import time
 import json
+import glob
+import tempfile
 import requests
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from pathlib import Path
@@ -17,6 +19,18 @@ try:
     HAS_ANTHROPIC = True
 except ImportError:
     HAS_ANTHROPIC = False
+
+try:
+    import yt_dlp
+    HAS_YTDLP = True
+except ImportError:
+    HAS_YTDLP = False
+
+try:
+    import openai
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -387,6 +401,137 @@ def download_batch(batch_id):
             zipf.write(video_file, video_file.name)
     
     return send_file(zip_path, as_attachment=True)
+
+def parse_vtt_subtitles(vtt_path):
+    """Parse VTT subtitle file into clean transcript text"""
+    with open(vtt_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    lines = content.split('\n')
+    text_lines = []
+    seen = set()
+
+    for line in lines:
+        line = line.strip()
+        # Skip VTT headers, timestamps, and empty lines
+        if not line or line.startswith('WEBVTT') or line.startswith('Kind:') or line.startswith('Language:'):
+            continue
+        if '-->' in line:
+            continue
+        if line.isdigit():
+            continue
+
+        # Remove HTML tags (TikTok uses <b>, <i>, etc.)
+        clean = re.sub(r'<[^>]+>', '', line).strip()
+
+        if clean and clean not in seen:
+            seen.add(clean)
+            text_lines.append(clean)
+
+    return ' '.join(text_lines)
+
+
+def extract_transcript_from_url(url, openai_api_key=None):
+    """Extract transcript from a video URL (TikTok, YouTube Shorts, Instagram Reels)"""
+    if not HAS_YTDLP:
+        return {'success': False, 'error': 'yt-dlp not installed on server'}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Step 1: Try to extract subtitles (free, fast)
+        try:
+            ydl_opts = {
+                'writeautomaticsub': True,
+                'writesubtitles': True,
+                'subtitleslangs': ['en', 'en-US', 'en-GB', 'en-orig'],
+                'subtitlesformat': 'vtt',
+                'skip_download': True,
+                'outtmpl': os.path.join(tmpdir, 'subs'),
+                'quiet': True,
+                'no_warnings': True,
+                'socket_timeout': 30,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            # Look for any .vtt files
+            sub_files = glob.glob(os.path.join(tmpdir, '*.vtt'))
+
+            if sub_files:
+                transcript = parse_vtt_subtitles(sub_files[0])
+                if transcript and len(transcript.strip()) > 20:
+                    return {'success': True, 'transcript': transcript, 'method': 'subtitles'}
+        except Exception as e:
+            print(f"Subtitle extraction error: {e}")
+
+        # Step 2: Fall back to Whisper API (needs OpenAI key + ffmpeg)
+        if not openai_api_key:
+            return {
+                'success': False,
+                'error': 'No captions found on this video. Enter an OpenAI API key to transcribe the audio with Whisper AI.'
+            }
+
+        if not HAS_OPENAI:
+            return {'success': False, 'error': 'OpenAI package not installed on server'}
+
+        try:
+            # Download audio only
+            audio_opts = {
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '128',
+                }],
+                'outtmpl': os.path.join(tmpdir, 'audio.%(ext)s'),
+                'quiet': True,
+                'no_warnings': True,
+                'socket_timeout': 30,
+            }
+
+            with yt_dlp.YoutubeDL(audio_opts) as ydl:
+                ydl.download([url])
+
+            # Find the downloaded audio file
+            audio_files = glob.glob(os.path.join(tmpdir, 'audio.*'))
+            if not audio_files:
+                return {'success': False, 'error': 'Failed to download audio from this URL'}
+
+            # Transcribe with Whisper
+            client = openai.OpenAI(api_key=openai_api_key)
+            with open(audio_files[0], 'rb') as f:
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f,
+                    response_format="text"
+                )
+
+            return {'success': True, 'transcript': transcription, 'method': 'whisper'}
+
+        except Exception as e:
+            return {'success': False, 'error': f'Whisper transcription failed: {str(e)}'}
+
+
+@app.route('/api/extract-transcript', methods=['POST'])
+def extract_transcript():
+    """Extract transcript from a video URL"""
+    data = request.json
+    url = data.get('url', '').strip()
+    openai_api_key = data.get('openai_api_key') or os.environ.get('OPENAI_API_KEY')
+
+    if not url:
+        return jsonify({'error': 'No URL provided'}), 400
+
+    result = extract_transcript_from_url(url, openai_api_key)
+
+    if result['success']:
+        return jsonify({
+            'transcript': result['transcript'],
+            'method': result['method']
+        })
+    else:
+        return jsonify({'error': result['error']}), 400
+
 
 @app.route('/api/chunk-transcript', methods=['POST'])
 def chunk_transcript():
