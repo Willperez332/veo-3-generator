@@ -434,7 +434,10 @@ def parse_vtt_subtitles(vtt_path):
             seen.add(clean)
             text_lines.append(clean)
 
-    return ' '.join(text_lines)
+    result = ' '.join(text_lines)
+    # Clean Unicode line/paragraph separators
+    result = result.replace('\u2028', ' ').replace('\u2029', ' ')
+    return result
 
 
 def extract_transcript_from_url(url, openai_api_key=None):
@@ -511,6 +514,11 @@ def extract_transcript_from_url(url, openai_api_key=None):
                     file=f,
                     response_format="text"
                 )
+
+            # Clean Unicode line/paragraph separators and other non-ASCII whitespace
+            if isinstance(transcription, str):
+                transcription = transcription.replace('\u2028', ' ').replace('\u2029', ' ')
+                transcription = transcription.encode('utf-8', errors='replace').decode('utf-8')
 
             return {'success': True, 'transcript': transcription, 'method': 'whisper'}
 
