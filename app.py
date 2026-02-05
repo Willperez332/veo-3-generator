@@ -394,13 +394,19 @@ def download_batch(batch_id):
     if not video_files:
         return jsonify({'error': 'No completed videos to download'}), 404
     
-    # Create ZIP
-    zip_path = Path(app.config['OUTPUT_FOLDER']) / f"batch_{batch_id}.zip"
+    # Get custom batch name if provided
+    batch_name = None
+    if request.is_json:
+        batch_name = request.json.get('batch_name')
+
+    # Create ZIP with custom or default name
+    zip_filename = f"{batch_name}.zip" if batch_name else f"batch_{batch_id}.zip"
+    zip_path = Path(app.config['OUTPUT_FOLDER']) / zip_filename
     with zipfile.ZipFile(zip_path, 'w') as zipf:
         for video_file in video_files:
             zipf.write(video_file, video_file.name)
-    
-    return send_file(zip_path, as_attachment=True)
+
+    return send_file(zip_path, as_attachment=True, download_name=zip_filename)
 
 def parse_vtt_subtitles(vtt_path):
     """Parse VTT subtitle file into clean transcript text"""
@@ -517,7 +523,7 @@ def extract_transcript():
     """Extract transcript from a video URL"""
     data = request.json
     url = data.get('url', '').strip()
-    openai_api_key = data.get('openai_api_key') or os.environ.get('OPENAI_API_KEY')
+    openai_api_key = os.environ.get('OPENAI_API_KEY')
 
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
@@ -542,7 +548,7 @@ def chunk_transcript():
     data = request.json
     raw_text = data.get('raw_text', '').strip()
     tonality = data.get('tonality', 'an informational tone')
-    api_key = data.get('api_key') or os.environ.get('ANTHROPIC_API_KEY')
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
 
     if not raw_text:
         return jsonify({'error': 'No transcript text provided'}), 400

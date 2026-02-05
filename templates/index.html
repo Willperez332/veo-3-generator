@@ -184,6 +184,27 @@
         .batch-list {
             display: grid;
             gap: 16px;
+            max-height: 400px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .batch-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .batch-list::-webkit-scrollbar-track {
+            background: #1a1a1a;
+            border-radius: 3px;
+        }
+
+        .batch-list::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 3px;
+        }
+
+        .batch-list::-webkit-scrollbar-thumb:hover {
+            background: #666;
         }
         
         .batch-card {
@@ -414,6 +435,26 @@
             font-style: italic;
         }
 
+        .chunk-text[contenteditable="true"] {
+            cursor: text;
+            padding: 8px 10px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            transition: border-color 0.2s, background 0.2s;
+            outline: none;
+            min-height: 40px;
+        }
+
+        .chunk-text[contenteditable="true"]:hover {
+            border-color: #333;
+            background: rgba(255,255,255,0.02);
+        }
+
+        .chunk-text[contenteditable="true"]:focus {
+            border-color: #E91E8C;
+            background: rgba(233, 30, 140, 0.05);
+        }
+
         #rawTranscript {
             min-height: 150px;
         }
@@ -579,15 +620,6 @@
                         Supports TikTok, YouTube Shorts, and Instagram Reels
                     </p>
 
-                    <!-- OpenAI key for Whisper fallback -->
-                    <div style="margin-top: 12px; padding: 12px; background: #111; border: 1px solid #2a2a2a; border-radius: 8px;">
-                        <label style="font-size: 11px;">OpenAI API Key (Whisper fallback — only needed if video has no captions)</label>
-                        <input type="password" id="openaiKey" placeholder="sk-...">
-                        <p style="color: #555; font-size: 11px; margin-top: 4px;">
-                            Get yours at <a href="https://platform.openai.com" target="_blank" style="color: #00D4E8;">platform.openai.com</a>
-                        </p>
-                    </div>
-
                     <!-- Extraction result -->
                     <div id="extractResult" class="hidden" style="margin-top: 12px;">
                         <label>Extracted Transcript <span id="extractMethod"></span></label>
@@ -603,27 +635,7 @@
                     <option value="a serious/warning tone">Serious/Warning</option>
                 </select>
 
-                <!-- AI Chunking Option -->
-                <div style="margin-top: 4px; margin-bottom: 16px; padding: 16px; background: #0a0a0a; border: 1px solid #333; border-radius: 12px;">
-                    <label style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 10px;">
-                        <input type="checkbox" id="useAI" checked style="width: 18px; height: 18px; accent-color: #E91E8C; cursor: pointer;">
-                        <span style="text-transform: none; letter-spacing: 0; font-size: 14px; color: #e0e0e0; font-weight: 600;">
-                            🧠 AI-Powered Chunking (Recommended)
-                        </span>
-                    </label>
-                    <p style="color: #666; font-size: 12px; margin-top: 8px; margin-left: 28px;">
-                        Uses Claude AI to intelligently split at semantic boundaries, keep cause→effect pairs together, and clean filler words.
-                    </p>
-                    <div id="aiKeySection" style="margin-top: 12px;">
-                        <label>Anthropic API Key</label>
-                        <input type="password" id="anthropicKey" placeholder="sk-ant-...">
-                        <p style="color: #666; font-size: 12px; margin-top: 4px;">
-                            Get yours at <a href="https://console.anthropic.com" target="_blank" style="color: #00D4E8;">console.anthropic.com</a>. Key is saved in your browser.
-                        </p>
-                    </div>
-                </div>
-
-                <button id="chunkBtn" onclick="generateChunks()">✂️ Generate Chunks</button>
+                <button id="chunkBtn" onclick="generateChunks()" style="margin-top: 12px;">🧠 AI Chunk Script</button>
 
                 <div id="chunksPreview" class="hidden">
                     <div class="section-title" style="margin-top: 20px;">Preview</div>
@@ -700,7 +712,11 @@ NO CAPTIONS ON SCREEN..."></textarea>
                 <div class="progress-fill" id="progressFill"></div>
             </div>
             <div class="job-list" id="jobList"></div>
-            <button id="downloadBtn" class="download-btn hidden" onclick="downloadBatch()">📥 Download All Videos</button>
+            <div id="downloadSection" class="hidden" style="margin-top: 20px;">
+                <label>Batch Name</label>
+                <input type="text" id="batchName" placeholder="e.g. magnesium_script_v1" style="margin-bottom: 12px;">
+                <button id="downloadBtn" class="download-btn" onclick="downloadBatch()">📥 Download All Videos</button>
+            </div>
         </div>
     </div>
 
@@ -841,7 +857,7 @@ NO CAPTIONS ON SCREEN..."></textarea>
                         activeBatches[currentBatchId].status = 'complete';
                         localStorage.setItem('veo_batches', JSON.stringify(activeBatches));
                         updateBatchManager();
-                        document.getElementById('downloadBtn').classList.remove('hidden');
+                        document.getElementById('downloadSection').classList.remove('hidden');
                     }
                 }
             } catch (error) {
@@ -937,7 +953,7 @@ NO CAPTIONS ON SCREEN..."></textarea>
                     pollInterval = setInterval(() => pollStatus(apiKey), 5000);
                     pollStatus(apiKey);
                 } else {
-                    document.getElementById('downloadBtn').classList.remove('hidden');
+                    document.getElementById('downloadSection').classList.remove('hidden');
                 }
             }
         }
@@ -949,15 +965,23 @@ NO CAPTIONS ON SCREEN..."></textarea>
             document.getElementById('downloadBtn').textContent = '⏳ Preparing ZIP...';
 
             try {
+                const batchName = document.getElementById('batchName').value.trim();
                 const response = await fetch(`/api/download/${currentBatchId}`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_name: batchName || null })
                 });
 
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `veo3_batch_${currentBatchId}.zip`;
+
+                // Use custom name or fallback
+                const filename = batchName
+                    ? `${batchName.replace(/[^a-zA-Z0-9_-]/g, '_')}.zip`
+                    : `veo3_batch_${currentBatchId}.zip`;
+                a.download = filename;
                 a.click();
 
                 document.getElementById('downloadBtn').disabled = false;
@@ -970,27 +994,6 @@ NO CAPTIONS ON SCREEN..."></textarea>
         }
 
         // ========== Script Formatter Functions ==========
-
-        // Save/load API keys
-        document.getElementById('anthropicKey').addEventListener('change', (e) => {
-            localStorage.setItem('anthropic_api_key', e.target.value);
-        });
-        document.getElementById('openaiKey').addEventListener('change', (e) => {
-            localStorage.setItem('openai_api_key', e.target.value);
-        });
-
-        // Toggle AI key section visibility
-        document.getElementById('useAI').addEventListener('change', (e) => {
-            document.getElementById('aiKeySection').style.display = e.target.checked ? 'block' : 'none';
-        });
-
-        // Load saved keys on page load
-        window.addEventListener('DOMContentLoaded', () => {
-            const savedAnthropicKey = localStorage.getItem('anthropic_api_key');
-            if (savedAnthropicKey) document.getElementById('anthropicKey').value = savedAnthropicKey;
-            const savedOpenaiKey = localStorage.getItem('openai_api_key');
-            if (savedOpenaiKey) document.getElementById('openaiKey').value = savedOpenaiKey;
-        });
 
         // ===== Input Mode Switching =====
 
@@ -1005,7 +1008,6 @@ NO CAPTIONS ON SCREEN..."></textarea>
 
         async function extractTranscript() {
             const url = document.getElementById('videoUrl').value.trim();
-            const openaiKey = document.getElementById('openaiKey').value.trim();
 
             if (!url) {
                 alert('Please paste a video URL');
@@ -1020,10 +1022,7 @@ NO CAPTIONS ON SCREEN..."></textarea>
                 const response = await fetch('/api/extract-transcript', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        url: url,
-                        openai_api_key: openaiKey || null
-                    })
+                    body: JSON.stringify({ url: url })
                 });
 
                 const data = await response.json();
@@ -1070,7 +1069,6 @@ NO CAPTIONS ON SCREEN..."></textarea>
         async function generateChunks() {
             let rawText = document.getElementById('rawTranscript').value.trim();
             const tonality = document.getElementById('tonality').value;
-            const useAI = document.getElementById('useAI').checked;
 
             // Also check extracted text if URL mode was used
             if (!rawText) {
@@ -1085,23 +1083,12 @@ NO CAPTIONS ON SCREEN..."></textarea>
                 return;
             }
 
-            if (useAI) {
-                await chunkWithAI(rawText, tonality);
-            } else {
-                chunkWithJS(rawText, tonality);
-            }
+            await chunkWithAI(rawText, tonality);
         }
 
         // ===== AI-Powered Chunking (calls backend → Claude API) =====
 
         async function chunkWithAI(rawText, tonality) {
-            const apiKey = document.getElementById('anthropicKey').value.trim();
-
-            if (!apiKey) {
-                alert('Please enter your Anthropic API key for AI chunking, or uncheck "AI-Powered Chunking" to use basic mode.');
-                return;
-            }
-
             const btn = document.getElementById('chunkBtn');
             const originalText = btn.textContent;
             btn.textContent = '🧠 AI is chunking...';
@@ -1113,8 +1100,7 @@ NO CAPTIONS ON SCREEN..."></textarea>
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         raw_text: rawText,
-                        tonality: tonality,
-                        api_key: apiKey
+                        tonality: tonality
                     })
                 });
 
@@ -1204,32 +1190,64 @@ NO CAPTIONS ON SCREEN..."></textarea>
 
         function displayChunksPreview(chunks) {
             const container = document.getElementById('chunksList');
-            const totalWords = chunks.reduce((sum, c) => sum + c.wordCount, 0);
-            const avgWords = (totalWords / chunks.length).toFixed(1);
 
-            container.innerHTML = chunks.map(chunk => {
-                let wordCountClass = 'word-count-good';
-                if (chunk.wordCount < 23 || chunk.wordCount > 28) {
-                    wordCountClass = 'word-count-bad';
-                } else if (chunk.wordCount < 25 || chunk.wordCount > 27) {
-                    wordCountClass = 'word-count-warn';
-                }
+            container.innerHTML = chunks.map((chunk, index) => {
+                let wordCountClass = getWordCountClass(chunk.wordCount);
 
                 return `
                     <div class="chunk-card">
                         <div class="chunk-header">
                             <span class="chunk-label">${chunk.label}</span>
-                            <span class="chunk-word-count ${wordCountClass}">${chunk.wordCount} words</span>
+                            <span class="chunk-word-count ${wordCountClass}" id="wc-${index}">${chunk.wordCount} words</span>
                         </div>
-                        <div class="chunk-text">"${chunk.text}"</div>
+                        <div class="chunk-text" contenteditable="true" id="ct-${index}" oninput="updateChunkText(${index}, this)">${chunk.text}</div>
                     </div>
                 `;
             }).join('');
 
+            updateChunkStats();
+            document.getElementById('chunksPreview').classList.remove('hidden');
+        }
+
+        function getWordCountClass(wc) {
+            if (wc < 23 || wc > 28) return 'word-count-bad';
+            if (wc < 25 || wc > 27) return 'word-count-warn';
+            return 'word-count-good';
+        }
+
+        function updateChunkText(index, el) {
+            const text = el.innerText.trim();
+            const wc = text ? text.split(/\s+/).length : 0;
+
+            // Update the stored chunk
+            if (window.generatedChunks && window.generatedChunks[index]) {
+                window.generatedChunks[index].text = text;
+                window.generatedChunks[index].wordCount = wc;
+
+                const tonality = document.getElementById('tonality').value;
+                const label = window.generatedChunks[index].label;
+                window.generatedChunks[index].formatted = `${label}\nNO CAPTIONS ON SCREEN. NO CAMERA MOVEMENTS. NO EDITS. NO BACKGROUND MUSIC.\nHandheld phone video style, Make the avatar say in ${tonality}:\n"${text}"`;
+            }
+
+            // Update badge
+            const badge = document.getElementById(`wc-${index}`);
+            if (badge) {
+                badge.textContent = `${wc} words`;
+                badge.className = `chunk-word-count ${getWordCountClass(wc)}`;
+            }
+
+            updateChunkStats();
+        }
+
+        function updateChunkStats() {
+            if (!window.generatedChunks) return;
+            const chunks = window.generatedChunks;
+            const totalWords = chunks.reduce((sum, c) => sum + c.wordCount, 0);
+            const avgWords = chunks.length > 0 ? (totalWords / chunks.length).toFixed(1) : 0;
+
             document.getElementById('chunkCount').textContent = chunks.length;
             document.getElementById('totalWords').textContent = totalWords;
             document.getElementById('avgWords').textContent = avgWords;
-            document.getElementById('chunksPreview').classList.remove('hidden');
         }
 
         function copyChunks() {
