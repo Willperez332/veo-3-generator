@@ -506,21 +506,22 @@ def extract_transcript_from_url(url, openai_api_key=None):
             if not audio_files:
                 return {'success': False, 'error': 'Failed to download audio from this URL'}
 
-            # Transcribe with Whisper
+            # Transcribe with Whisper (use JSON format to avoid ASCII encoding issues)
             client = openai.OpenAI(api_key=openai_api_key)
             with open(audio_files[0], 'rb') as f:
                 transcription = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=f,
-                    response_format="text"
+                    response_format="json"
                 )
 
-            # Clean Unicode line/paragraph separators and other non-ASCII whitespace
-            if isinstance(transcription, str):
-                transcription = transcription.replace('\u2028', ' ').replace('\u2029', ' ')
-                transcription = transcription.encode('utf-8', errors='replace').decode('utf-8')
+            # Extract text from JSON response object
+            transcript_text = transcription.text if hasattr(transcription, 'text') else str(transcription)
 
-            return {'success': True, 'transcript': transcription, 'method': 'whisper'}
+            # Clean Unicode line/paragraph separators
+            transcript_text = transcript_text.replace('\u2028', ' ').replace('\u2029', ' ')
+
+            return {'success': True, 'transcript': transcript_text, 'method': 'whisper'}
 
         except Exception as e:
             return {'success': False, 'error': f'Whisper transcription failed: {str(e)}'}
